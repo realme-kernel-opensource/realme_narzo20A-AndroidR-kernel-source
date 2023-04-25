@@ -854,14 +854,6 @@ static int msm_csid_release(struct csid_device *csid_dev)
 
 	msm_camera_enable_irq(csid_dev->irq, false);
 
-	if (msm_camera_tz_is_secured(
-		MSM_CAMERA_TZ_IO_REGION_CSIDCORE0 + csid_dev->pdev->id) == 0) {
-		msm_camera_vio_w(csid_dev->ctrl_reg->csid_reg.csid_rst_stb_all,
-			csid_dev->base,
-			csid_dev->ctrl_reg->csid_reg.csid_rst_cmd_addr,
-			csid_dev->pdev->id);
-	}
-
 	msm_camera_clk_enable(&csid_dev->pdev->dev,
 		csid_dev->csid_clk_info,
 		csid_dev->csid_clk,

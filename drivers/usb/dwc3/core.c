@@ -374,10 +374,16 @@ static void dwc3_free_event_buffers(struct dwc3 *dwc)
 	struct dwc3_event_buffer	*evt;
 
 	evt = dwc->ev_buf;
+#ifdef OPLUS_FEATURE_CHG_BASIC
 	if (evt) {
+#else
+	if (evt)
+#endif
 		dwc3_free_one_event_buffer(dwc, evt);
+#ifdef OPLUS_FEATURE_CHG_BASIC
 		dwc->ev_buf = NULL;
 	}
+#endif
 
 	/* free GSI related event buffers */
 	dwc3_notify_event(dwc, DWC3_GSI_EVT_BUF_FREE, 0);

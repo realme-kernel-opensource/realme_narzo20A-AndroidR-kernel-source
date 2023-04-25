@@ -1,0 +1,33 @@
+#ifdef OPLUS_FEATURE_TP_BASIC
+config OPPO_COMMON_SOFT
+  bool "config oppo common software"
+  select OPPO_ARCH_FILE
+  help
+        define this config to get project verion from sharemem.
+        Maybe this value is from CDT or dynamic identify by hardware
+        id.
+
+config OPPO_DEVICE_IFNO
+  bool "config oppo devinfo"
+  select OPPO_ARCH_FILE
+  help
+        define this config to compile devinfo.c for device register
+
+source "drivers/soc/oplus/device_info/Kconfig"
+#endif /* OPLUS_FEATURE_TP_BASIC */
+
+#ifdef OPLUS_FEATURE_LOWMEM_DBG
+source "drivers/soc/oplus/lowmem_dbg/Kconfig"
+##endif /* OPLUS_FEATURE_LOWMEM_DBG */
+
+#ifdef OPLUS_FEATURE_MEMLEAK_DETECT
+source "drivers/soc/oplus/oppo_svelte/Kconfig"
+#endif /* OPLUS_FEATURE_MEMLEAK_DETECT */
+
+#ifdef OPLUS_FEATURE_THERMAL_HORAE
+source "drivers/soc/oplus/thermal/Kconfig"
+#endif /* OPLUS_FEATURE_THERMAL_HORAE */
+
+#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
+source "drivers/soc/oplus/owakelock/Kconfig"
+#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */

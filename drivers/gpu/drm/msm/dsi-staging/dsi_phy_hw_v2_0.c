@@ -16,6 +16,9 @@
 #include <linux/delay.h>
 #include "dsi_hw.h"
 #include "dsi_phy_hw.h"
+#ifdef OPLUS_BUG_STABILITY
+extern bool mipi_d_phy_ilitek_innolux_gg3_flag;
+#endif /*OPLUS_BUG_STABILITY*/
 
 #define DSIPHY_CMN_REVISION_ID0                   0x0000
 #define DSIPHY_CMN_REVISION_ID1                   0x0004
@@ -207,8 +210,12 @@ void dsi_phy_hw_v2_0_enable(struct dsi_phy_hw *phy,
 		for (j = 0; j < lanecfg->count_per_lane; j++)
 			DSI_W32(phy, DSIPHY_DLNX_CFG(i, j),
 				lanecfg->lane[i][j]);
-
-		DSI_W32(phy, DSIPHY_DLNX_TEST_STR(i), 0x88);
+		#ifdef OPLUS_BUG_STABILITY
+		if(mipi_d_phy_ilitek_innolux_gg3_flag)
+			DSI_W32(phy, DSIPHY_DLNX_TEST_STR(i), 0x44);
+		else
+			DSI_W32(phy, DSIPHY_DLNX_TEST_STR(i), 0x88);
+		#endif /*OPLUS_BUG_STABILITY*/
 
 		for (j = 0; j < timing->count_per_lane; j++)
 			DSI_W32(phy, DSIPHY_DLNX_TIMING_CTRL(i, j),

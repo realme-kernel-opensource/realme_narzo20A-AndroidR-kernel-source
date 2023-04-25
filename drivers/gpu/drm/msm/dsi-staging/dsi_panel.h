@@ -29,6 +29,9 @@
 #include "dsi_pwr.h"
 #include "dsi_parser.h"
 #include "msm_drv.h"
+#ifdef OPLUS_BUG_STABILITY
+#include <linux/dsi_oppo_support.h>
+#endif /*OPLUS_BUG_STABILITY*/
 
 #define MAX_BL_LEVEL 4096
 #define MAX_BL_SCALE_LEVEL 1024
@@ -115,6 +118,12 @@ struct dsi_backlight_config {
 	u32 bl_max_level;
 	u32 brightness_max_level;
 	u32 brightness_default_level;
+#ifdef OPLUS_BUG_STABILITY
+	u32 bl_normal_max_level;
+	u32 brightness_normal_max_level;
+	int blmap_size;
+	int *blmap;
+#endif /* OPLUS_BUG_STABILITY */
 	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_scale_ad;
@@ -167,6 +176,17 @@ struct drm_panel_esd_config {
 	u32 groups;
 };
 
+#ifdef OPLUS_BUG_STABILITY
+struct dsi_panel_oppo_privite {
+
+	bool skip_mipi_last_cmd;
+	bool is_aod_ramless;
+	bool is_osc_support;
+	u32 osc_clk_mode0_rate;
+	u32 osc_clk_mode1_rate;
+};
+#endif /* OPLUS_BUG_STABILITY */
+
 struct dsi_panel {
 	const char *name;
 	const char *type;
@@ -217,6 +237,16 @@ struct dsi_panel {
 	bool sync_broadcast_en;
 	int power_mode;
 	enum dsi_panel_physical_type panel_type;
+
+#ifdef OPLUS_BUG_STABILITY
+	bool is_hbm_enabled;
+	/* Fix aod flash problem */
+	bool need_power_on_backlight;
+	struct dsi_panel_oppo_privite oppo_priv;
+	bool novatek_flag;
+	bool ilitek_innolux_gg3_flag;
+	atomic_t esd_recovery_flag;
+#endif
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -336,5 +366,8 @@ struct dsi_panel *dsi_panel_ext_bridge_get(struct device *parent,
 int dsi_panel_parse_esd_reg_read_configs(struct dsi_panel *panel);
 
 void dsi_panel_ext_bridge_put(struct dsi_panel *panel);
-
+#ifdef OPLUS_BUG_STABILITY
+int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
+			   enum dsi_cmd_set_type type);
+#endif
 #endif /* _DSI_PANEL_H_ */

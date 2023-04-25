@@ -41,6 +41,12 @@
 #include <linux/compiler.h>
 #include <linux/gfp.h>
 #include <linux/module.h>
+//#ifdef OPLUS_FEATURE_DATA_EVAL
+#include <net/oplus/oplus_kernel2user.h>
+//#endif /* OPLUS_FEATURE_DATA_EVAL */
+//#ifdef OPLUS_FEATURE_NWPOWER
+#include <net/oplus_nwpower.h>
+//#endif /* OPLUS_FEATURE_NWPOWER */
 
 /* People can turn this off for buggy TCP's found in printers etc. */
 int sysctl_tcp_retrans_collapse __read_mostly = 1;
@@ -1117,6 +1123,9 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 			      tcp_skb_pcount(skb));
 
 	tp->segs_out += tcp_skb_pcount(skb);
+	//#ifdef OPLUS_FEATURE_DATA_EVAL
+	oplus_handle_retransmit(sk, 0);
+	//#endif /* OPLUS_FEATURE_DATA_EVAL */
 	/* OK, its time to fill skb_shinfo(skb)->gso_{segs|size} */
 	skb_shinfo(skb)->gso_segs = tcp_skb_pcount(skb);
 	skb_shinfo(skb)->gso_size = tcp_skb_mss(skb);
@@ -1130,6 +1139,9 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 
 	err = icsk->icsk_af_ops->queue_xmit(sk, skb, &inet->cork.fl);
 
+	//#ifdef OPLUS_FEATURE_NWPOWER
+	oplus_match_tcp_output(sk);
+	//#endif /* OPLUS_FEATURE_NWPOWER */
 	if (unlikely(err > 0)) {
 		tcp_enter_cwr(sk);
 		err = net_xmit_eval(err);
@@ -2852,6 +2864,9 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
 	unsigned int cur_mss;
 	int diff, len, err;
 
+	//#ifdef OPLUS_FEATURE_DATA_EVAL
+	oplus_handle_retransmit(sk, 1);
+	//#endif /* OPLUS_FEATURE_DATA_EVAL */
 
 	/* Inconclusive MTU probe */
 	if (icsk->icsk_mtup.probe_size)
@@ -2937,9 +2952,15 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
 	} else {
 		err = tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC);
 	}
+	//#ifdef OPLUS_FEATURE_DATA_EVAL
+	oplus_handle_retransmit(sk, -1); // in this function, tcp_transmit_skb is called again.
+	//#endif /* OPLUS_FEATURE_DATA_EVAL */
 
 	if (likely(!err)) {
 		TCP_SKB_CB(skb)->sacked |= TCPCB_EVER_RETRANS;
+		//#ifdef OPLUS_FEATURE_NWPOWER
+		oplus_match_tcp_output_retrans(sk);
+		//#endif /* OPLUS_FEATURE_NWPOWER */
 	} else if (err != -EBUSY) {
 		NET_ADD_STATS(sock_net(sk), LINUX_MIB_TCPRETRANSFAIL, segs);
 	}
@@ -3276,6 +3297,10 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 	tcp_options_write((__be32 *)(th + 1), NULL, &opts);
 	th->doff = (tcp_header_size >> 2);
 	__TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTSEGS);
+
+	//#ifdef OPLUS_FEATURE_DATA_EVAL
+	oplus_handle_retransmit(sk, 0);
+	//#endif /* OPLUS_FEATURE_DATA_EVAL */
 
 #ifdef CONFIG_TCP_MD5SIG
 	/* Okay, we have all we need - do the md5 hash if needed */
@@ -3783,6 +3808,9 @@ int tcp_rtx_synack(const struct sock *sk, struct request_sock *req)
 	res = af_ops->send_synack(sk, NULL, &fl, req, NULL, TCP_SYNACK_NORMAL);
 	if (!res) {
 		__TCP_INC_STATS(sock_net(sk), TCP_MIB_RETRANSSEGS);
+		//#ifdef OPLUS_FEATURE_DATA_EVAL
+		oplus_handle_retransmit(sk, 1);
+		//#endif /* OPLUS_FEATURE_DATA_EVAL */
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPSYNRETRANS);
 		if (unlikely(tcp_passive_fastopen(sk)))
 			tcp_sk(sk)->total_retrans++;

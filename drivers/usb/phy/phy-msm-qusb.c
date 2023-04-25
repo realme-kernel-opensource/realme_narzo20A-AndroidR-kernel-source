@@ -115,7 +115,7 @@ static unsigned int tune1;
 module_param(tune1, uint, 0644);
 MODULE_PARM_DESC(tune1, "QUSB PHY TUNE1");
 
-static unsigned int tune2;
+static unsigned int tune2 = 0x03;
 module_param(tune2, uint, 0644);
 MODULE_PARM_DESC(tune2, "QUSB PHY TUNE2");
 
@@ -123,11 +123,11 @@ static unsigned int tune3;
 module_param(tune3, uint, 0644);
 MODULE_PARM_DESC(tune3, "QUSB PHY TUNE3");
 
-static unsigned int tune4;
+static unsigned int tune4 = 0xCF;
 module_param(tune4, uint, 0644);
 MODULE_PARM_DESC(tune4, "QUSB PHY TUNE4");
 
-static unsigned int tune5;
+static unsigned int tune5 = 0x02;
 module_param(tune5, uint, 0644);
 MODULE_PARM_DESC(tune5, "QUSB PHY TUNE5");
 

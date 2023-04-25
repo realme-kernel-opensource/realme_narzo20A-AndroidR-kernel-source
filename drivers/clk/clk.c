@@ -27,7 +27,9 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
-
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#include <soc/oppo/oppo_project.h>
+#endif
 #include "clk.h"
 
 #if defined(CONFIG_COMMON_CLK)
@@ -3520,6 +3522,13 @@ static int __init clk_debug_init(void)
 	inited = 1;
 	mutex_unlock(&clk_debug_lock);
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+        if (oppo_daily_build() == true) {
+                debug_suspend = 1;
+        } else {
+                debug_suspend = 0;
+        }
+#endif /* OPLUS_FEATURE_CHG_BASIC */
 	return 0;
 }
 late_initcall(clk_debug_init);

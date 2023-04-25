@@ -108,6 +108,9 @@ int sch_direct_xmit(struct sk_buff *skb, struct Qdisc *q,
 		    spinlock_t *root_lock, bool validate);
 
 void __qdisc_run(struct Qdisc *q);
+#ifdef OPLUS_FEATURE_WIFI_LIMMITBGSPEED
+struct sk_buff *qdisc_dequeue_skb(struct Qdisc *q, bool *validate);
+#endif /* OPLUS_FEATURE_WIFI_LIMMITBGSPEED */
 
 static inline void qdisc_run(struct Qdisc *q)
 {

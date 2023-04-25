@@ -34,6 +34,7 @@
 #include <soc/qcom/socinfo.h>
 #include <linux/soc/qcom/smem.h>
 #include <soc/qcom/boot_stats.h>
+#include <soc/oplus/system/oppo_project.h>
 
 #define BUILD_ID_LENGTH 32
 #define CHIP_ID_LENGTH 32
@@ -286,6 +287,11 @@ static union {
 	struct socinfo_v0_14 v0_14;
 	struct socinfo_v0_15 v0_15;
 } *socinfo;
+
+#ifdef OPLUS_ARCH_EXTENDS
+static char *final_soc_id_string_homer = "SDM665";
+static char *final_soc_id_string_monajp = "SM6125";
+#endif
 
 /* max socinfo format version supported */
 #define MAX_SOCINFO_FORMAT SOCINFO_VERSION(0, 15)
@@ -1840,6 +1846,14 @@ int __init socinfo_init(void)
 		pr_warn("New IDs added! ID => CPU mapping needs an update.\n");
 
 	cur_cpu = cpu_of_id[socinfo->v0_1.id].generic_soc_type;
+	#ifdef OPLUS_ARCH_EXTENDS
+	if((get_project() == 19375) || (get_project() == 19376)) {
+		cpu_of_id[socinfo->v0_1.id].soc_id_string = final_soc_id_string_monajp;
+	} else {
+		cpu_of_id[socinfo->v0_1.id].soc_id_string = final_soc_id_string_homer;
+	}
+
+	#endif /* OPLUS_ARCH_EXTENDS */
 	boot_stats_init();
 	socinfo_print();
 	arch_read_hardware_id = msm_read_hardware_id;

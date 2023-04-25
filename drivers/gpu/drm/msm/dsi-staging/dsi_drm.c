@@ -441,6 +441,21 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 			 display->is_cont_splash_enabled))
 			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
 
+		#ifdef OPLUS_BUG_STABILITY
+		if (display->is_cont_splash_enabled)
+			dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_DMS;
+
+		if (display->panel && display->panel->oppo_priv.is_aod_ramless) {
+			if (crtc_state->active_changed && (dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) {
+				pr_err("dyn clk changed when active_changed, WA to skip dyn clk change\n");
+				dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_DYN_CLK;
+			}
+
+		if (dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DMS)
+			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_SEAMLESS;
+		}
+		#endif /* OPLUS_BUG_STABILITY */
+
 		/* Reject seemless transition when active/connectors changed.*/
 		if ((crtc_state->active_changed ||
 			(crtc_state->connectors_changed && clone_mode)) &&

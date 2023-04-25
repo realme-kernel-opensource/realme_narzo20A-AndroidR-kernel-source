@@ -223,6 +223,10 @@ source "drivers/input/serio/Kconfig"
 
 source "drivers/input/gameport/Kconfig"
 
+#ifdef VENDOR_EDIT
+source "drivers/input/oppo_fp_drivers/Kconfig"
+#endif
+
 endmenu
 
 endmenu

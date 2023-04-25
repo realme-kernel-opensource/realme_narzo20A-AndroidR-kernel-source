@@ -143,6 +143,10 @@ struct qcom_glink {
 
 	int irq;
 
+#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
+	char irqname[GLINK_NAME_SIZE];
+#endif/*OPLUS_FEATURE_POWERINFO_STANDBY*/
+
 	struct kthread_worker kworker;
 	struct task_struct *task;
 
@@ -2042,10 +2046,19 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 	else
 		irqflags = IRQF_NO_SUSPEND | IRQF_SHARED;
 
+#ifndef OPLUS_FEATURE_POWERINFO_STANDBY
 	ret = devm_request_irq(dev, irq,
 			       qcom_glink_native_intr,
 			       irqflags,
 			       "glink-native", glink);
+#else
+	snprintf(glink->irqname, 32, "glink-native-%s", glink->name);
+	ret = devm_request_irq(dev, irq,
+			       qcom_glink_native_intr,
+			       irqflags,
+			       glink->irqname, glink);
+#endif
+
 	if (ret) {
 		dev_err(dev, "failed to request IRQ\n");
 		goto unregister;

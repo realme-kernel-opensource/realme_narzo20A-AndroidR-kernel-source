@@ -15,6 +15,10 @@
 
 #include <linux/bitops.h>
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#include "../../oplus/charger_ic/oplus_battery_sm6125R.h"
+#endif
+
 #define SCHGM_FLASH_BASE			0xA600
 
 #define SCHGM_FLASH_STATUS_2_REG		(SCHGM_FLASH_BASE + 0x07)

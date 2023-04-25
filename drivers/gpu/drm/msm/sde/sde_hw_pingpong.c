@@ -42,7 +42,7 @@
 
 #define DITHER_DEPTH_MAP_INDEX 9
 static u32 dither_depth_map[DITHER_DEPTH_MAP_INDEX] = {
-	0, 0, 0, 0, 0, 1, 2, 3, 3
+	0, 0, 0, 0, 0, 0, 0, 1, 2
 };
 
 #define MERGE_3D_MODE 0x004
@@ -329,6 +329,9 @@ static int sde_hw_pp_setup_dither_v1(struct sde_hw_pingpong *pp,
 
 	c = &pp->hw;
 	base = pp->caps->sblk->dither.base;
+  /* add qcom patch to enable dither */
+	if(base==0)
+          base=0x30e0;
 	if (!dither) {
 		/* dither property disable case */
 		SDE_REG_WRITE(c, base, 0);

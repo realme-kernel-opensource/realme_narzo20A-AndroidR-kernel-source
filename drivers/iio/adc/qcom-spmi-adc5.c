@@ -739,8 +739,18 @@ static const struct adc_channels adc_chans_pmic5[ADC_MAX_CHANNEL] = {
 					SCALE_HW_CALIB_XOTHERM)
 	[ADC_BAT_THERM_PU2]	= ADC_CHAN_TEMP("bat_therm_pu2", 1,
 					SCALE_HW_CALIB_BATT_THERM_100K)
-	[ADC_BAT_THERM_PU1]	= ADC_CHAN_TEMP("bat_therm_pu1", 1,
+#ifndef OPLUS_FEATURE_CHG_BASIC
+	[ADC_BAT_THERM_PU1] = ADC_CHAN_TEMP("bat_therm_pu1", 1,
 					SCALE_HW_CALIB_BATT_THERM_30K)
+#else
+#if (SHIPPING_API_LEVEL == 28)
+	[ADC_BAT_THERM_PU1]	= ADC_CHAN_TEMP("bat_therm_pu1", 1,
+            SCALE_HW_CALIB_BATT_THERM_30K)
+#else
+    [ADC_BAT_THERM_PU1] = ADC_CHAN_TEMP("bat_therm_pu1", 1,
+					SCALE_HW_CALIB_DEFAULT)
+#endif
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
 	[ADC_BAT_THERM_PU3]	= ADC_CHAN_TEMP("bat_therm_pu3", 1,
 					SCALE_HW_CALIB_BATT_THERM_400K)
 	[ADC_BAT_ID_PU2]	= ADC_CHAN_TEMP("bat_id", 1,
@@ -753,24 +763,53 @@ static const struct adc_channels adc_chans_pmic5[ADC_MAX_CHANNEL] = {
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
 	[ADC_AMUX_THM4_PU2]	= ADC_CHAN_TEMP("amux_thm4_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	[ADC_PARALLEL_ISENSE] = ADC_CHAN_VOLT("parallel_isense", 1,
+					SCALE_HW_CALIB_CUR)
+	[ADC_INT_EXT_ISENSE_VBAT_VDATA]	= ADC_CHAN_POWER("int_ext_vbat_isense", 1,
+					SCALE_HW_CALIB_CUR)
+	[ADC_EXT_ISENSE_VBAT_VDATA]	= ADC_CHAN_POWER("ext_vbat_isense", 1,
+					SCALE_HW_CALIB_CUR)
+	[ADC_PARALLEL_ISENSE_VBAT_VDATA] = ADC_CHAN_POWER("parallel_vbat_isense", 1,
+					SCALE_HW_CALIB_CUR)
+#else
 	[ADC_INT_EXT_ISENSE_VBAT_VDATA]	= ADC_CHAN_POWER("int_ext_isense", 1,
 					SCALE_HW_CALIB_CUR)
 	[ADC_EXT_ISENSE_VBAT_VDATA]	= ADC_CHAN_POWER("ext_isense", 1,
 					SCALE_HW_CALIB_CUR)
 	[ADC_PARALLEL_ISENSE_VBAT_VDATA] = ADC_CHAN_POWER("parallel_isense", 1,
 					SCALE_HW_CALIB_CUR)
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
 	[ADC_AMUX_THM2]			= ADC_CHAN_TEMP("amux_thm2", 1,
 					SCALE_HW_CALIB_PM5_SMB_TEMP)
 	[ADC_AMUX_THM3]			= ADC_CHAN_TEMP("amux_thm3", 1,
 					SCALE_HW_CALIB_PM5_SMB_TEMP)
+#ifdef OPLUS_FEATURE_CHG_BASIC
+    [ADC_GPIO1_PU2] = ADC_CHAN_VOLT("usb_temp1", 1,
+            SCALE_HW_CALIB_DEFAULT)
+#else
 	[ADC_GPIO1_PU2]	= ADC_CHAN_TEMP("gpio1_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
+#if (SHIPPING_API_LEVEL == 28)
+	[ADC_GPIO2_PU2] = ADC_CHAN_VOLT("sub_adc_gpio3", 1,
+					SCALE_HW_CALIB_DEFAULT)
+#else
 	[ADC_GPIO2_PU2]	= ADC_CHAN_TEMP("gpio2_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+#endif
+#ifdef OPLUS_FEATURE_CHG_BASIC
+     [ADC_GPIO3_PU2] = ADC_CHAN_VOLT("usb_temp2", 1,
+             SCALE_HW_CALIB_DEFAULT)
+#else
 	[ADC_GPIO3_PU2]	= ADC_CHAN_TEMP("gpio3_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
 	[ADC_GPIO4_PU2]	= ADC_CHAN_TEMP("gpio4_pu2", 1,
 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+
+	[ADC_GPIO2]     = ADC_CHAN_VOLT("board_id_vdata", 1,
+					SCALE_HW_CALIB_DEFAULT)
 };
 
 static const struct adc_channels adc_chans_rev2[ADC_MAX_CHANNEL] = {
@@ -929,6 +968,17 @@ const struct adc_data data_pmic_rev2 = {
 					800, 900, 1, 2, 4, 6, 8, 10},
 };
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+const struct adc_data data_pmic5_lite = {
+	.full_scale_code_volt = 0x70e4,
+	/* On PMI632, IBAT LSB = 5A/32767 */
+	.full_scale_code_cur = 5000,
+	.adc_chans = adc_chans_pmic5,
+	.decimation = (unsigned int []) {250, 420, 840},
+	.hw_settle = (unsigned int []) {15, 100, 200, 300, 400, 500, 600, 700,
+					800, 900, 1, 2, 4, 6, 8, 10},
+};
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
 static const struct of_device_id adc_match_table[] = {
 	{
 		.compatible = "qcom,spmi-adc5",
@@ -938,6 +988,12 @@ static const struct of_device_id adc_match_table[] = {
 		.compatible = "qcom,spmi-adc-rev2",
 		.data = &data_pmic_rev2,
 	},
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	{
+		.compatible = "qcom,spmi-adc5-lite",
+		.data = &data_pmic5_lite,
+	},
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
 	{ }
 };
 

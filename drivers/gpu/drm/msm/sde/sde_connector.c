@@ -26,6 +26,12 @@
 
 #define BL_NODE_NAME_SIZE 32
 
+extern int panel_which;
+extern int is_ktd3136;
+
+#ifdef OPLUS_BUG_STABILITY
+extern bool is_brandon(void);
+#endif
 /* Autorefresh will occur after FRAME_CNT frames. Large values are unlikely */
 #define AUTOREFRESH_MAX_FRAME_CNT 6
 
@@ -34,6 +40,9 @@
 
 #define SDE_ERROR_CONN(c, fmt, ...) SDE_ERROR("conn%d " fmt,\
 		(c) ? (c)->base.base.id : -1, ##__VA_ARGS__)
+static u32 dither_matrix[DITHER_MATRIX_SZ] = {
+	15, 7, 13, 5, 3, 11, 1, 9, 12, 4, 14, 6, 0, 8, 2, 10
+};
 
 static const struct drm_prop_enum_list e_topology_name[] = {
 	{SDE_RM_TOPOLOGY_NONE,	"sde_none"},
@@ -64,6 +73,69 @@ static const struct drm_prop_enum_list e_qsync_mode[] = {
 	{SDE_RM_QSYNC_ONE_SHOT_MODE,	"one_shot"},
 };
 
+#ifdef OPLUS_BUG_STABILITY
+static int interpolate(int x, int xa, int xb, int ya, int yb)
+{
+	int bf, factor, plus;
+
+	bf = 2 * (yb - ya) * (x - xa) / (xb - xa);
+	factor = bf / 2;
+	plus = bf % 2;
+
+	return ya + factor + plus;
+}
+#endif
+
+
+#ifdef OPLUS_BUG_STABILITY
+static int backlight_remapping_into_tddic_reg(int level_brightness, struct dsi_display *display)
+{
+	int level_temp, value_a, value_b;
+	int level = level_brightness;
+
+	if ( level > 0) {
+		pr_debug(" %s  level %lld \n", __func__, level);
+
+		if (display->panel->bl_config.blmap){
+			if (level%32 > 0)
+				level_temp = level/32 + 1;
+			else
+				level_temp = level/32;
+
+			level_temp = level_temp - 1;
+			if((level_temp*2 + 1) > display->panel->bl_config.blmap_size){
+				pr_err(" %s android brightness level is more than 2047 or LCM blmap_size is setting short than 128 = %d\n", __func__, display->panel->bl_config.blmap_size);
+				return 0;
+			}
+			value_a = display->panel->bl_config.blmap[level_temp*2];
+			value_b = display->panel->bl_config.blmap[level_temp*2 + 1];
+
+			if (level <= 383)
+				level = value_a*level/100 + value_b;
+			else
+				level = value_a*level/100 - value_b;
+
+			pr_debug(" %s value_a %d   value_b %d level_temp %d level %lld\n", __func__, value_a, value_b, level_temp, level);
+			if (level < 0){
+				pr_err(" %s backlight value had been converted into a minus type = %d\n", __func__, level);
+				return 0;
+			}
+		}
+
+	if (level < display->panel->bl_config.bl_min_level)
+		level = display->panel->bl_config.bl_min_level;
+	if (level > display->panel->bl_config.bl_max_level)
+			level = display->panel->bl_config.bl_max_level;
+	return level;
+	} else if (level == 0){
+		return 0;
+	} else {
+		pr_err(" %s android brightness level is error = %d\n", __func__, level);
+		return 0;
+	}
+}
+
+#endif /*OPLUS_BUG_STABILITY*/
 static int sde_backlight_device_update_status(struct backlight_device *bd)
 {
 	int brightness;
@@ -82,17 +154,55 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 
 	c_conn = bl_get_data(bd);
 	display = (struct dsi_display *) c_conn->display;
-	if (brightness > display->panel->bl_config.bl_max_level)
-		brightness = display->panel->bl_config.bl_max_level;
 
+    #ifdef OPLUS_BUG_STABILITY
+	if (is_brandon()) {
+	if (is_ktd3136 < 0) {
+		if (panel_which == 1) {
+			display->panel->bl_config.bl_max_level = 1940;
+		} else if (panel_which == 3) {
+			display->panel->bl_config.bl_max_level = 1980;
+		} else if (panel_which == 4) {
+			display->panel->bl_config.bl_max_level = 1980;
+		}
+	} else {
+		if (brightness > display->panel->bl_config.bl_max_level)
+			brightness = display->panel->bl_config.bl_max_level;
+	}
+	} else { /* is_brandon() */
+		if (brightness > display->panel->bl_config.bl_max_level)
+			brightness = display->panel->bl_config.bl_max_level;
+	} /* is_brandon() */
+    #endif
+
+
+#ifndef OPLUS_BUG_STABILITY
 	/* map UI brightness into driver backlight level with rounding */
 	bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_max_level,
 			display->panel->bl_config.brightness_max_level);
+#else
+	if (brightness > display->panel->bl_config.brightness_normal_max_level) {
+		bl_lvl = interpolate(brightness,
+				display->panel->bl_config.brightness_normal_max_level,
+				display->panel->bl_config.brightness_max_level,
+				display->panel->bl_config.bl_normal_max_level,
+				display->panel->bl_config.bl_max_level);
+	} else {
+		bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_normal_max_level,
+				display->panel->bl_config.brightness_normal_max_level);
+	}
+#endif
 
+
+#ifdef OPLUS_BUG_STABILITY
+	bl_lvl=backlight_remapping_into_tddic_reg(brightness, display);
+	pr_info("LCD_LOG0 %s  level after %lld \n", __func__, bl_lvl);
+#endif /*OPLUS_BUG_STABILITY*/
 	if (!bl_lvl && brightness)
 		bl_lvl = 1;
 
-	if (!c_conn->allow_bl_update) {
+	if (display->panel->bl_config.bl_update ==
+		BL_UPDATE_DELAY_UNTIL_FIRST_FRAME && !c_conn->allow_bl_update) {
 		c_conn->unset_bl_level = bl_lvl;
 		return 0;
 	}
@@ -236,12 +346,60 @@ void sde_connector_unregister_event(struct drm_connector *connector,
 	(void)sde_connector_register_event(connector, event_idx, 0, 0);
 }
 
+static int _sde_connector_get_default_dither_cfg_v1(
+		struct sde_connector *c_conn, void *cfg)
+{
+	struct drm_msm_dither *dither_cfg = (struct drm_msm_dither *)cfg;
+	enum dsi_pixel_format dst_format = DSI_PIXEL_FORMAT_MAX;
+
+	if (!c_conn || !cfg) {
+		SDE_ERROR("invalid argument(s), c_conn %pK, cfg %pK\n",
+				c_conn, cfg);
+		return -EINVAL;
+	}
+
+	if (!c_conn->ops.get_dst_format) {
+		SDE_DEBUG("get_dst_format is unavailable\n");
+		return 0;
+	}
+
+	dst_format = c_conn->ops.get_dst_format(&c_conn->base, c_conn->display);
+	switch (dst_format) {
+	case DSI_PIXEL_FORMAT_RGB888:
+		dither_cfg->c0_bitdepth = 8;
+		dither_cfg->c1_bitdepth = 8;
+		dither_cfg->c2_bitdepth = 8;
+		dither_cfg->c3_bitdepth = 8;
+		break;
+	case DSI_PIXEL_FORMAT_RGB666:
+	case DSI_PIXEL_FORMAT_RGB666_LOOSE:
+		dither_cfg->c0_bitdepth = 6;
+		dither_cfg->c1_bitdepth = 6;
+		dither_cfg->c2_bitdepth = 6;
+		dither_cfg->c3_bitdepth = 6;
+		break;
+	default:
+		SDE_DEBUG("no default dither config for dst_format %d\n",
+			dst_format);
+		return -ENODATA;
+	}
+
+	memcpy(&dither_cfg->matrix, dither_matrix,
+			sizeof(u32) * DITHER_MATRIX_SZ);
+	dither_cfg->temporal_en = 0;
+	return 0;
+}
+
 static void _sde_connector_install_dither_property(struct drm_device *dev,
 		struct sde_kms *sde_kms, struct sde_connector *c_conn)
 {
 	char prop_name[DRM_PROP_NAME_LEN];
 	struct sde_mdss_cfg *catalog = NULL;
-	u32 version = 0;
+	struct drm_property_blob *blob_ptr;
+	void *cfg;
+	int ret = 0;
+	u32 version = 0, len = 0;
+	bool defalut_dither_needed = false;
 
 	if (!dev || !sde_kms || !c_conn) {
 		SDE_ERROR("invld args (s), dev %pK, sde_kms %pK, c_conn %pK\n",
@@ -259,51 +417,54 @@ static void _sde_connector_install_dither_property(struct drm_device *dev,
 		msm_property_install_blob(&c_conn->property_info, prop_name,
 			DRM_MODE_PROP_BLOB,
 			CONNECTOR_PROP_PP_DITHER);
+		len = sizeof(struct drm_msm_dither);
+		cfg = kzalloc(len, GFP_KERNEL);
+		if (!cfg)
+			return;
+
+		ret = _sde_connector_get_default_dither_cfg_v1(c_conn, cfg);
+		if (!ret)
+			defalut_dither_needed = true;
 		break;
 	default:
 		SDE_ERROR("unsupported dither version %d\n", version);
 		return;
 	}
+
+	if (defalut_dither_needed) {
+		blob_ptr = drm_property_create_blob(dev, len, cfg);
+		if (IS_ERR_OR_NULL(blob_ptr))
+			goto exit;
+		c_conn->blob_dither = blob_ptr;
+	}
+exit:
+	kfree(cfg);
 }
 
 int sde_connector_get_dither_cfg(struct drm_connector *conn,
 			struct drm_connector_state *state, void **cfg,
-			size_t *len, bool idle_pc)
+			size_t *len)
 {
 	struct sde_connector *c_conn = NULL;
 	struct sde_connector_state *c_state = NULL;
 	size_t dither_sz = 0;
-	bool is_dirty;
 	u32 *p = (u32 *)cfg;
 
-	if (!conn || !state || !p) {
-		SDE_ERROR("invalid arguments\n");
+	if (!conn || !state || !p)
 		return -EINVAL;
-	}
 
 	c_conn = to_sde_connector(conn);
 	c_state = to_sde_connector_state(state);
 
-	is_dirty = msm_property_is_dirty(&c_conn->property_info,
-			&c_state->property_state,
-			CONNECTOR_PROP_PP_DITHER);
-
-	if (!is_dirty && !idle_pc) {
-		return -ENODATA;
-	} else if (is_dirty || idle_pc) {
-		*cfg = msm_property_get_blob(&c_conn->property_info,
-				&c_state->property_state,
-				&dither_sz,
-				CONNECTOR_PROP_PP_DITHER);
-		/*
-		 * In idle_pc use case return early, when dither is
-		 * already disabled.
-		 */
-		if (idle_pc && *cfg == NULL)
-			return -ENODATA;
-		/* disable dither based on user config data */
-		else if (*cfg == NULL)
-			return 0;
+	/* try to get user config data first */
+	*cfg = msm_property_get_blob(&c_conn->property_info,
+					&c_state->property_state,
+					&dither_sz,
+					CONNECTOR_PROP_PP_DITHER);
+	/* if user config data doesn't exist, use default dither blob */
+	if (*cfg == NULL && c_conn->blob_dither) {
+		*cfg = c_conn->blob_dither->data;
+		dither_sz = c_conn->blob_dither->length;
 	}
 	*len = dither_sz;
 	return 0;
@@ -464,6 +625,10 @@ static int _sde_connector_update_bl_scale(struct sde_connector *c_conn)
 	struct dsi_backlight_config *bl_config;
 	int rc = 0;
 
+#ifdef OPLUS_BUG_STABILITY
+	struct backlight_device *bd;
+#endif /* OPLUS_BUG_STABILITY */
+
 	if (!c_conn) {
 		SDE_ERROR("Invalid params sde_connector null\n");
 		return -EINVAL;
@@ -477,10 +642,24 @@ static int _sde_connector_update_bl_scale(struct sde_connector *c_conn)
 		return -EINVAL;
 	}
 
+#ifdef OPLUS_BUG_STABILITY
+	bd = c_conn->bl_device;
+	if (!bd) {
+		SDE_ERROR("Invalid params backlight_device null\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&bd->update_lock);
+#endif /* OPLUS_BUG_STABILITY */
+
 	bl_config = &dsi_display->panel->bl_config;
 
-	if (!c_conn->allow_bl_update) {
+	if (dsi_display->panel->bl_config.bl_update ==
+		BL_UPDATE_DELAY_UNTIL_FIRST_FRAME && !c_conn->allow_bl_update) {
 		c_conn->unset_bl_level = bl_config->bl_level;
+#ifdef OPLUS_BUG_STABILITY
+		mutex_unlock(&bd->update_lock);
+#endif /* OPLUS_BUG_STABILITY */
 		return 0;
 	}
 
@@ -503,6 +682,10 @@ static int _sde_connector_update_bl_scale(struct sde_connector *c_conn)
 	rc = c_conn->ops.set_backlight(&c_conn->base,
 			dsi_display, bl_config->bl_level);
 	c_conn->unset_bl_level = 0;
+
+#ifdef OPLUS_BUG_STABILITY
+	mutex_unlock(&bd->update_lock);
+#endif /* OPLUS_BUG_STABILITY */
 
 	return rc;
 }
@@ -535,6 +718,240 @@ void sde_connector_set_qsync_params(struct drm_connector *connector)
 		}
 	}
 }
+
+#ifdef OPLUS_BUG_STABILITY
+extern bool sde_crtc_get_fingerprint_mode(struct drm_crtc_state *crtc_state);
+extern bool sde_crtc_get_fingerprint_pressed(struct drm_crtc_state *crtc_state);
+extern int oppo_display_get_hbm_mode(void);
+extern int sde_crtc_set_onscreenfinger_defer_sync(struct drm_crtc_state *crtc_state, bool defer_sync);
+extern int oppo_dimlayer_bl;
+extern int oppo_dimlayer_bl_enable_real;
+extern int oppo_dimlayer_bl_enable;
+extern int oppo_dimlayer_bl_enabled;
+extern int oppo_dimlayer_bl_delay;
+extern int oppo_dimlayer_bl_delay_after;
+extern int oppo_dimlayer_bl_enable_v2;
+int oppo_dimlayer_bl_enable_v2_real = 0;
+
+int sde_connector_update_backlight(struct drm_connector *connector)
+{
+	if (oppo_dimlayer_bl != oppo_dimlayer_bl_enabled) {
+		struct sde_connector *c_conn = to_sde_connector(connector);
+
+		oppo_dimlayer_bl_enabled = oppo_dimlayer_bl;
+		usleep_range(oppo_dimlayer_bl_delay, oppo_dimlayer_bl_delay + 100);
+		_sde_connector_update_bl_scale(c_conn);
+		usleep_range(oppo_dimlayer_bl_delay_after, oppo_dimlayer_bl_delay_after + 100);
+	}
+
+	if (oppo_dimlayer_bl_enable_v2 != oppo_dimlayer_bl_enable_v2_real) {
+		struct sde_connector *c_conn = to_sde_connector(connector);
+
+		oppo_dimlayer_bl_enable_v2_real = oppo_dimlayer_bl_enable_v2;
+		_sde_connector_update_bl_scale(c_conn);
+	}
+
+	return 0;
+}
+
+int sde_connector_update_hbm_backlight(struct drm_connector *connector)
+{
+    struct sde_connector *c_conn = to_sde_connector(connector);
+	_sde_connector_update_bl_scale(c_conn);
+	return 0;
+}
+
+extern u32 flag_writ;
+extern int oppo_dimlayer_hbm_vblank_count;
+extern atomic_t oppo_dimlayer_hbm_vblank_ref;
+extern u32 oppo_onscreenfp_pressed_up_status;
+extern int oppo_fod_on_vblank;
+extern int oppo_fod_off_vblank;
+extern int oppo_panel_process_dimming_v2(struct dsi_panel *panel,int bl_lvl, bool force_disable);
+extern int oppo_display_mode;
+extern int oppo_seed_backlight;
+int sde_connector_update_hbm(struct drm_connector *connector)
+{
+	struct sde_connector *c_conn = to_sde_connector(connector);
+	struct dsi_display *dsi_display;
+	struct sde_connector_state *c_state;
+	int rc = 0;
+	int fingerprint_mode;
+
+	if (!c_conn) {
+		SDE_ERROR("Invalid params sde_connector null\n");
+		return -EINVAL;
+	}
+
+	if (c_conn->connector_type != DRM_MODE_CONNECTOR_DSI)
+		return 0;
+
+	c_state = to_sde_connector_state(connector->state);
+
+	dsi_display = c_conn->display;
+	if (!dsi_display || !dsi_display->panel) {
+		SDE_ERROR("Invalid params(s) dsi_display %pK, panel %pK\n",
+			dsi_display,
+			((dsi_display) ? dsi_display->panel : NULL));
+		return -EINVAL;
+	}
+
+	if (!c_conn->encoder || !c_conn->encoder->crtc ||
+	    !c_conn->encoder->crtc->state) {
+		return 0;
+	}
+
+	fingerprint_mode = sde_crtc_get_fingerprint_mode(c_conn->encoder->crtc->state);
+	if (OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+		if (sde_crtc_get_fingerprint_pressed(c_conn->encoder->crtc->state)) {
+			sde_crtc_set_onscreenfinger_defer_sync(c_conn->encoder->crtc->state, true);
+		} else {
+			sde_crtc_set_onscreenfinger_defer_sync(c_conn->encoder->crtc->state, false);
+			fingerprint_mode = false;
+		}
+	} else {
+		sde_crtc_set_onscreenfinger_defer_sync(c_conn->encoder->crtc->state, false);
+	}
+
+	if (fingerprint_mode != dsi_display->panel->is_hbm_enabled) {
+		struct drm_crtc *crtc = c_conn->encoder->crtc;
+		struct dsi_panel *panel = dsi_display->panel;
+		int vblank = 0;
+		u32 target_vblank, current_vblank;
+		int ret;
+
+		if (oppo_fod_on_vblank >= 0)
+			panel->cur_mode->priv_info->fod_on_vblank = oppo_fod_on_vblank;
+		if (oppo_fod_off_vblank >= 0)
+			panel->cur_mode->priv_info->fod_off_vblank = oppo_fod_off_vblank;
+
+		pr_err("OnscreenFingerprint mode: %s",
+		       fingerprint_mode ? "Enter" : "Exit");
+		oppo_onscreenfp_pressed_up_status = 0;
+		dsi_display->panel->is_hbm_enabled = fingerprint_mode;
+		if (fingerprint_mode) {
+			if (!dsi_display->panel->oppo_priv.is_aod_ramless || oppo_display_mode) {
+				mutex_lock(&dsi_display->panel->panel_lock);
+				if (oppo_seed_backlight) {
+					int frame_time_us;
+
+					frame_time_us = mult_frac(1000, 1000, panel->cur_mode->timing.refresh_rate);
+					oppo_panel_process_dimming_v2(panel, panel->bl_config.bl_level, true);
+					mipi_dsi_dcs_set_display_brightness(&panel->mipi_device, panel->bl_config.bl_level);
+					usleep_range(frame_time_us, frame_time_us + 100);
+				}
+
+			    if (OPPO_DISPLAY_AOD_SCENE != get_oppo_display_scene() &&
+			        dsi_display->panel->bl_config.bl_level) {
+				    if (dsi_display->config.panel_mode != DSI_OP_VIDEO_MODE) {
+				    current_vblank = drm_crtc_vblank_count(crtc);
+				    ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
+						    current_vblank != drm_crtc_vblank_count(crtc),
+						    msecs_to_jiffies(17));
+				    }
+
+				    vblank = panel->cur_mode->priv_info->fod_on_vblank;
+
+				    dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+						         DSI_CORE_CLK, DSI_CLK_ON);
+
+				    target_vblank = drm_crtc_vblank_count(crtc) + vblank;
+				    rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_ON);
+
+				    dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+						         DSI_CORE_CLK, DSI_CLK_OFF);
+				    if (vblank) {
+					    ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
+							    target_vblank == drm_crtc_vblank_count(crtc),
+							    msecs_to_jiffies((vblank + 1) * 17 ));
+					    if (!ret) {
+						    pr_err("OnscreenFingerprint failed to wait vblank timeout target_vblank=%d current_vblank=%d\n",
+							    target_vblank, drm_crtc_vblank_count(crtc));
+					    }
+				    }
+			    } else {
+				    dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+						         DSI_CORE_CLK, DSI_CLK_ON);
+				    rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_ON);
+				    dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+						         DSI_CORE_CLK, DSI_CLK_OFF);
+			    }
+
+			    mutex_unlock(&dsi_display->panel->panel_lock);
+			    if (rc) {
+				    pr_err("failed to send DSI_CMD_HBM_ON cmds, rc=%d\n", rc);
+				    return rc;
+			    }
+			}
+		} else {
+
+			mutex_lock(&dsi_display->panel->panel_lock);
+
+			current_vblank = drm_crtc_vblank_count(crtc);
+			ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
+					current_vblank == drm_crtc_vblank_count(crtc),
+					msecs_to_jiffies(17));
+
+			vblank = panel->cur_mode->priv_info->fod_off_vblank;
+			target_vblank = drm_crtc_vblank_count(crtc) + vblank;
+
+			dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+					     DSI_CORE_CLK, DSI_CLK_ON);
+			if(OPPO_DISPLAY_AOD_HBM_SCENE == get_oppo_display_scene()) {
+				if (OPPO_DISPLAY_POWER_DOZE_SUSPEND == get_oppo_display_power_status() ||
+				    OPPO_DISPLAY_POWER_DOZE == get_oppo_display_power_status()) {
+					rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_OFF);
+					set_oppo_display_scene(OPPO_DISPLAY_AOD_SCENE);
+				} else {
+					rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_SET_NOLP);
+					/* set nolp would exit hbm, restore when panel status on hbm */
+					if (oppo_display_get_hbm_mode()) {
+						rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_ON);
+					}
+					set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
+				}
+			} else if (oppo_display_get_hbm_mode()) {
+				/* Do nothing to skip hbm off */
+			} else if(OPPO_DISPLAY_AOD_SCENE == get_oppo_display_scene()) {
+				rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_AOD_HBM_OFF);
+			} else {
+				rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_HBM_OFF);
+				//oppo_onscreenfp_pressed_up_status = 1;
+			}
+
+			dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+					     DSI_CORE_CLK, DSI_CLK_OFF);
+			mutex_unlock(&dsi_display->panel->panel_lock);
+			if (rc) {
+				pr_err("failed to send DSI_CMD_HBM_OFF cmds, rc=%d\n", rc);
+				return rc;
+			}
+			_sde_connector_update_bl_scale(c_conn);
+
+			if (vblank) {
+				ret = wait_event_timeout(*drm_crtc_vblank_waitqueue(crtc),
+						target_vblank == drm_crtc_vblank_count(crtc),
+						msecs_to_jiffies((vblank + 1) * 17 ));
+				if (!ret) {
+					pr_err("OnscreenFingerprint failed to wait vblank timeout target_vblank=%d current_vblank=%d\n",
+							target_vblank, drm_crtc_vblank_count(crtc));
+				}
+			}
+		}
+	}
+
+	if (oppo_dimlayer_hbm_vblank_count > 0) {
+		oppo_dimlayer_hbm_vblank_count--;
+	} else {
+		while (atomic_read(&oppo_dimlayer_hbm_vblank_ref) > 0) {
+			drm_crtc_vblank_put(connector->state->crtc);
+			atomic_dec(&oppo_dimlayer_hbm_vblank_ref);
+		}
+	}
+
+	return 0;
+}
+#endif
 
 static int _sde_connector_update_dirty_properties(
 				struct drm_connector *connector)
@@ -719,11 +1136,20 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector)
 				BL_UPDATE_DELAY_UNTIL_FIRST_FRAME)
 		sde_encoder_wait_for_event(c_conn->encoder,
 				MSM_ENC_TX_COMPLETE);
+
+#ifdef OPLUS_BUG_STABILITY
+	msleep(15);
+#endif /*OPLUS_BUG_STABILITY*/
 	c_conn->allow_bl_update = true;
 
 	if (c_conn->bl_device) {
 		c_conn->bl_device->props.power = FB_BLANK_UNBLANK;
 		c_conn->bl_device->props.state &= ~BL_CORE_FBBLANK;
+		#ifdef OPLUS_BUG_STABILITY
+		if (is_brandon()) {
+			usleep_range(50*1000, 51*1000);
+		}
+		#endif
 		backlight_update_status(c_conn->bl_device);
 	}
 	c_conn->panel_dead = false;
@@ -2337,7 +2763,10 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	msm_property_install_range(&c_conn->property_info, "ad_bl_scale",
 		0x0, 0, MAX_AD_BL_SCALE_LEVEL, MAX_AD_BL_SCALE_LEVEL,
 		CONNECTOR_PROP_AD_BL_SCALE);
-
+#ifdef OPLUS_BUG_STABILITY
+	msm_property_install_range(&c_conn->property_info,"CONNECTOR_CUST",
+		0x0, 0, INT_MAX, 0, CONNECTOR_PROP_CUSTOM);
+#endif
 	c_conn->bl_scale_dirty = false;
 	c_conn->bl_scale = MAX_BL_SCALE_LEVEL;
 	c_conn->bl_scale_ad = MAX_AD_BL_SCALE_LEVEL;

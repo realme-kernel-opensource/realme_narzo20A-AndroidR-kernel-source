@@ -64,6 +64,11 @@ struct msm_rpm_master_stats_platform_data {
 	s32 num_masters;
 	u32 master_offset;
 	u32 version;
+
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+    struct kobj_attribute opluska;
+    struct kobject *opluskobj;
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 };
 
 static DEFINE_MUTEX(msm_rpm_master_stats_mutex);
@@ -278,6 +283,70 @@ static int msm_rpm_master_copy_stats(
 	master_cnt++;
 	return RPM_MASTERS_BUF_LEN - count;
 }
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+#define MSM_ARCH_TIMER_FREQ 19200000
+static inline u64 get_time_in_msec(u64 counter)
+{
+	do_div(counter, MSM_ARCH_TIMER_FREQ);
+	counter *= MSEC_PER_SEC;
+	return counter;
+}
+
+static int oplus_rpm_master_copy_stats(
+		struct msm_rpm_master_stats_private_data *prvdata, char *buf)
+{
+	struct msm_rpm_master_stats record;
+	struct msm_rpm_master_stats_platform_data *pdata;
+	static int master_cnt;
+	int count, i;
+
+	/* Iterate possible number of masters */
+	if (master_cnt > prvdata->num_masters - 1) {
+		master_cnt = 0;
+		return 0;
+	}
+
+	pdata = prvdata->platform_data;
+	count = RPM_MASTERS_BUF_LEN;
+
+    for (i = 0; i < prvdata->num_masters; i++) {
+    if (prvdata->platform_data->version == 2) {
+            SNPRINTF(buf, count, "%s:",
+                    GET_MASTER_NAME(master_cnt, prvdata));
+
+            record.xo_count =
+                    readl_relaxed(prvdata->reg_base +
+                    (master_cnt * pdata->master_offset +
+                    offsetof(struct msm_rpm_master_stats,
+                    xo_count)));
+
+            SNPRINTF(buf, count, "%x", record.xo_count);
+
+            record.xo_accumulated_duration =
+            readq_relaxed(prvdata->reg_base +
+			        (master_cnt * pdata->master_offset +
+                    offsetof(struct msm_rpm_master_stats,
+                    xo_accumulated_duration)));
+
+            SNPRINTF(buf, count, ":%llX\n", get_time_in_msec(record.xo_accumulated_duration));
+        } else {
+		    SNPRINTF(buf, count, "%s_shutdown:",
+            GET_MASTER_NAME(master_cnt, prvdata));
+
+            record.numshutdowns = readl_relaxed(prvdata->reg_base +
+            (master_cnt * pdata->master_offset) + 0x0);
+
+            SNPRINTF(buf, count, "%x\n",record.numshutdowns);
+        }
+
+		master_cnt++;
+    }
+
+	master_cnt = 0;
+	return RPM_MASTERS_BUF_LEN - count;
+}
+
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 
 static ssize_t msm_rpm_master_stats_file_read(struct file *file,
 				char __user *bufu, size_t count, loff_t *ppos)
@@ -423,11 +492,33 @@ err:
 	return NULL;
 }
 
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+struct msm_rpm_master_stats_private_data sysfs_prvdata;
+
+static ssize_t oplus_rpmh_master_stats_show(struct kobject *kobj,
+                struct kobj_attribute *attr, char *buf)
+{
+        mutex_lock(&msm_rpm_master_stats_mutex);
+        sysfs_prvdata.len = oplus_rpm_master_copy_stats(&sysfs_prvdata, buf);
+        mutex_unlock(&msm_rpm_master_stats_mutex);
+
+        return sysfs_prvdata.len;
+
+}
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
+
+
 static  int msm_rpm_master_stats_probe(struct platform_device *pdev)
 {
 	struct dentry *dent;
 	struct msm_rpm_master_stats_platform_data *pdata;
-	struct resource *res = NULL;
+
+    struct resource *res = NULL;
+
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+        struct kobject *rpmh_master_stats_kobj = NULL;
+        int ret = 0;
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 
 	if (!pdev)
 		return -EINVAL;
@@ -462,15 +553,57 @@ static  int msm_rpm_master_stats_probe(struct platform_device *pdev)
 								__func__);
 		return -ENOMEM;
 	}
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+	sysfs_prvdata.reg_base = ioremap(pdata->phys_addr_base,
+						pdata->phys_size);
+	if (!sysfs_prvdata.reg_base) {
+        pr_err("ERROR could not ioremap start=%pa, len=%u\n",
+                &pdata->phys_addr_base, pdata->phys_size);
+		return -ENOMEM;
+	}
+	sysfs_prvdata.len = 0;
+	sysfs_prvdata.num_masters = pdata->num_masters;
+	sysfs_prvdata.master_names = pdata->masters;
+    sysfs_prvdata.platform_data = pdata;
 
+    rpmh_master_stats_kobj = kobject_create_and_add(
+                    "rpmh_stats",
+                    power_kobj);
+    if (!rpmh_master_stats_kobj)
+        return -ENOMEM;
+
+    pdata->opluskobj = rpmh_master_stats_kobj;
+
+    sysfs_attr_init(&prvdata->opluska.attr);
+    pdata->opluska.attr.mode = 0444;
+    pdata->opluska.attr.name = "oplus_rpmh_master_stats";
+    pdata->opluska.show = oplus_rpmh_master_stats_show;
+    pdata->opluska.store = NULL;
+
+    ret = sysfs_create_file(pdata->opluskobj, &pdata->opluska.attr);
+    if (ret) {
+        pr_err("sysfs_create_file oplus failed\n");
+        goto fail_sysfs_oplus;
+}
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 	platform_set_drvdata(pdev, dent);
 	return 0;
+
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+fail_sysfs_oplus:
+    kobject_put(pdata->opluskobj);
+    return ret;
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 }
 
 static int msm_rpm_master_stats_remove(struct platform_device *pdev)
 {
 	struct dentry *dent;
 
+#ifdef OPLUS_FEATURE_POWERINFO_RPMH
+	if (sysfs_prvdata.reg_base)
+        iounmap(sysfs_prvdata.reg_base);
+#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 	dent = platform_get_drvdata(pdev);
 	debugfs_remove(dent);
 	platform_set_drvdata(pdev, NULL);

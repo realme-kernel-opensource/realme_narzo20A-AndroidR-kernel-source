@@ -28,6 +28,15 @@
 #include <linux/suspend.h>
 #include <linux/slab.h>
 
+#define MAX_WAKEUP_REASON_IRQS 32
+static int irq_list[MAX_WAKEUP_REASON_IRQS];
+static int irqcount;
+static bool suspend_abort;
+//static char abort_reason[MAX_SUSPEND_ABORT_LEN];
+//static struct kobject *wakeup_reason;
+static DEFINE_SPINLOCK(resume_reason_lock);
+
+
 /*
  * struct wakeup_irq_node - stores data and relationships for IRQs logged as
  * either base or nested wakeup reasons during suspend/resume flow.
@@ -349,6 +358,70 @@ static struct attribute_group attr_group = {
 	.attrs = attrs,
 };
 
+/*
+ * logs all the wake up reasons to the kernel
+ * stores the irqs to expose them to the userspace via sysfs
+ */
+void log_wakeup_reason(int irq)
+{
+	struct irq_desc *desc;
+	desc = irq_to_desc(irq);
+	if (desc && desc->action && desc->action->name)
+		printk(KERN_INFO "Resume caused by IRQ %d, %s\n", irq,
+				desc->action->name);
+	else
+		printk(KERN_INFO "Resume caused by IRQ %d\n", irq);
+
+	spin_lock(&resume_reason_lock);
+	if (irqcount == MAX_WAKEUP_REASON_IRQS) {
+		spin_unlock(&resume_reason_lock);
+		printk(KERN_WARNING "Resume caused by more than %d IRQs\n",
+				MAX_WAKEUP_REASON_IRQS);
+		return;
+	}
+
+	irq_list[irqcount++] = irq;
+	spin_unlock(&resume_reason_lock);
+}
+
+int check_wakeup_reason(int irq)
+{
+	int irq_no;
+	int ret = false;
+
+	spin_lock(&resume_reason_lock);
+	for (irq_no = 0; irq_no < irqcount; irq_no++)
+		if (irq_list[irq_no] == irq) {
+			ret = true;
+			break;
+	}
+	spin_unlock(&resume_reason_lock);
+	return ret;
+}
+/*
+void log_suspend_abort_reason(const char *fmt, ...)
+{
+	va_list args;
+
+	spin_lock(&resume_reason_lock);
+
+	//Suspend abort reason has already been logged.
+	if (suspend_abort) {
+		spin_unlock(&resume_reason_lock);
+		return;
+	}
+	#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
+	wakeup_sleep_abort_all++;
+	#endif
+
+	suspend_abort = true;
+	va_start(args, fmt);
+	vsnprintf(abort_reason, MAX_SUSPEND_ABORT_LEN, fmt, args);
+	va_end(args);
+	spin_unlock(&resume_reason_lock);
+}
+*/
+
 /* Detects a suspend and clears all the previous wake up reasons*/
 static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		unsigned long pm_event, void *unused)
@@ -395,7 +468,6 @@ static int __init wakeup_reason_init(void)
 		pr_warn("[%s] failed to create a sysfs group\n", __func__);
 		goto fail_kobject_put;
 	}
-
 	wakeup_irq_nodes_cache =
 		kmem_cache_create("wakeup_irq_node_cache",
 				  sizeof(struct wakeup_irq_node), 0, 0, NULL);

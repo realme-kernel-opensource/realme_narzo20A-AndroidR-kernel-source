@@ -32,6 +32,29 @@
 #include "sde_dbg.h"
 #include "dsi_parser.h"
 
+#ifdef OPLUS_BUG_STABILITY
+#ifdef CONFIG_OPLUS_FEATURE_MM_FEEDBACK
+#include <soc/oplus/system/oplus_mm_kevent_fb.h>
+#endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
+#include <linux/msm_drm_notify.h>
+#include <linux/notifier.h>
+extern int msm_drm_notifier_call_chain(unsigned long val, void *v);
+extern int oppo_dsi_update_seed_mode(void);
+#ifdef OPLUS_BUG_STABILITY
+extern int dsi_update_dynamic_osc_clock(void);
+#endif
+#ifdef OPLUS_BUG_STABILITY
+int himax_backlight_off = 0;
+int vid_cmd_mode_change = -1;
+#endif
+/* Add for solve sau issue*/
+extern int lcd_closebl_flag;
+/* Add for fingerprint silence*/
+extern int lcd_closebl_flag_fp;
+/* Add for ffl feature */
+extern bool oppo_ffl_trigger_finish;
+#endif
+
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
 #define NO_OVERRIDE -1
@@ -43,6 +66,11 @@
 
 #define DSI_CLOCK_BITRATE_RADIX 10
 #define MAX_TE_SOURCE_ID  2
+
+#ifdef OPLUS_BUG_STABILITY
+static struct dsi_display *primary_display;
+static struct dsi_display *secondary_display;
+#endif /* OPLUS_BUG_STABILITY */
 
 DEFINE_MUTEX(dsi_display_clk_mutex);
 
@@ -183,6 +211,11 @@ void dsi_rect_intersect(const struct dsi_rect *r1,
 	}
 }
 
+#ifdef OPLUS_BUG_STABILITY
+extern int oppo_start_ffl_thread(void);
+extern void oppo_stop_ffl_thread(void);
+#endif /* OPLUS_BUG_STABILITY */
+
 int dsi_display_set_backlight(struct drm_connector *connector,
 		void *display, u32 bl_lvl)
 {
@@ -199,11 +232,51 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 
 	mutex_lock(&panel->panel_lock);
 	if (!dsi_panel_initialized(panel)) {
-		rc = -EINVAL;
+                pr_err("dsi panel not ready\n");
 		goto error;
 	}
 
+#ifdef OPLUS_BUG_STABILITY
+	if ((bl_lvl == 0 && panel->bl_config.bl_level != 0) ||
+	    (bl_lvl != 0 && panel->bl_config.bl_level == 0))
+		pr_err("backlight level changed %d -> %d\n",
+		       panel->bl_config.bl_level, bl_lvl);
+
+#ifdef OPLUS_BUG_STABILITY
+/*Compare bl_level for power off*/
+	if((panel->bl_config.bl_level) > bl_lvl)
+		himax_backlight_off = 1;
+#endif
+
+	/* Add some delay to avoid screen flash */
+	if (panel->need_power_on_backlight && bl_lvl) {
+		panel->need_power_on_backlight = false;
+		rc = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_CORE_CLK, DSI_CLK_ON);
+		if (rc) {
+			pr_err("[%s] failed to send DSI_CMD_POST_ON_BACKLIGHT cmds, rc=%d\n",
+			       panel->name, rc);
+			goto error;
+		}
+
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_POST_ON_BACKLIGHT);
+
+		rc = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
+			DSI_CORE_CLK, DSI_CLK_OFF);
+		if (rc) {
+			pr_err("[%s] failed to send DSI_CMD_POST_ON_BACKLIGHT cmds, rc=%d\n",
+			       panel->name, rc);
+			goto error;
+		}
+
+		oppo_start_ffl_thread();
+	}
+#endif /* OPLUS_BUG_STABILITY */
 	panel->bl_config.bl_level = bl_lvl;
+#ifdef OPLUS_BUG_STABILITY
+	if (oppo_ffl_trigger_finish == false)
+		goto error;
+#endif /* VENDOR_EDIT */
 
 	/* scale backlight */
 	bl_scale = panel->bl_config.bl_scale;
@@ -223,6 +296,15 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 		goto error;
 	}
 
+	//#ifdef OPLUS_BUG_STABILITY
+	if(lcd_closebl_flag) {
+		pr_err("silence reboot we should set backlight to zero\n");
+		bl_temp = 0;
+	} else if (bl_lvl) {
+		lcd_closebl_flag_fp = 0;
+	}
+	//#endif /*OPLUS_BUG_STABILITY*/
+
 	rc = dsi_panel_set_backlight(panel, (u32)bl_temp);
 	if (rc)
 		pr_err("unable to set backlight\n");
@@ -240,7 +322,11 @@ error:
 	return rc;
 }
 
+#ifndef OPLUS_BUG_STABILITY
 static int dsi_display_cmd_engine_enable(struct dsi_display *display)
+#else
+int dsi_display_cmd_engine_enable(struct dsi_display *display)
+#endif /*OPLUS_BUG_STABILITY*/
 {
 	int rc = 0;
 	int i;
@@ -284,7 +370,11 @@ done:
 	return rc;
 }
 
+#ifndef OPLUS_BUG_STABILITY
 static int dsi_display_cmd_engine_disable(struct dsi_display *display)
+#else
+int dsi_display_cmd_engine_disable(struct dsi_display *display)
+#endif /*OPLUS_BUG_STABILITY*/
 {
 	int rc = 0;
 	int i;
@@ -470,7 +560,11 @@ error:
 }
 
 /* Allocate memory for cmd dma tx buffer */
+#ifndef OPLUS_BUG_STABILITY
 static int dsi_host_alloc_cmd_tx_buffer(struct dsi_display *display)
+#else
+int dsi_host_alloc_cmd_tx_buffer(struct dsi_display *display)
+#endif
 {
 	int rc = 0, cnt = 0;
 	struct dsi_display_ctrl *display_ctrl;
@@ -576,6 +670,20 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 			return true;
 		group += len;
 	}
+
+#ifdef CONFIG_OPLUS_FEATURE_MM_FEEDBACK
+	{
+		char payload[150] = "";
+		int cnt = 0;
+
+		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "ESD:");
+		for (i = 0; i < len; ++i)
+			cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "[%02x] ", config->return_buf[i]);
+
+		DRM_ERROR("ESD check failed: %s\n", payload);
+		mm_fb_display_kevent(payload, MM_FB_KEY_RATELIMIT_1H, "ESD check failed");
+	}
+#endif  /*CONFIG_OPLUS_FEATURE_MM_FEEDBACK*/
 
 	return false;
 }
@@ -845,7 +953,9 @@ exit:
 	/* Handle Panel failures during display disable sequence */
 	if (rc <= 0)
 		atomic_set(&panel->esd_recovery_pending, 1);
-
+	#ifdef OPLUS_BUG_STABILITY
+	atomic_set(&panel->esd_recovery_flag, 1);
+	#endif /*OPLUS_BUG_STABILITY*/
 release_panel_lock:
 	dsi_panel_release_panel_lock(panel);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
@@ -1053,6 +1163,7 @@ static bool dsi_display_get_cont_splash_status(struct dsi_display *display)
 	return true;
 }
 
+#ifndef OPLUS_BUG_STABILITY
 int dsi_display_set_power(struct drm_connector *connector,
 		int power_mode, void *disp)
 {
@@ -1071,12 +1182,118 @@ int dsi_display_set_power(struct drm_connector *connector,
 	case SDE_MODE_DPMS_LP2:
 		rc = dsi_panel_set_lp2(display->panel);
 		break;
+	default:
+		rc = dsi_panel_set_nolp(display->panel);
+		break;
+	}
+	return rc;
+}
+#else /*OPLUS_BUG_STABILITY*/
+extern bool sde_crtc_get_fingerprint_mode(struct drm_crtc_state *crtc_state);
+extern bool sde_crtc_get_fingerprint_pressed(struct drm_crtc_state *crtc_state);
+static bool sde_connector_get_fp_mode(struct drm_connector *connector)
+{
+	if (!connector || !connector->state || !connector->state->crtc)
+		return false;
+
+	return sde_crtc_get_fingerprint_mode(connector->state->crtc->state);
+}
+
+static bool sde_connector_get_fppress_mode(struct drm_connector *connector)
+{
+	if (!connector || !connector->state || !connector->state->crtc)
+		return false;
+
+	return sde_crtc_get_fingerprint_pressed(connector->state->crtc->state);
+}
+
+int dsi_display_set_power(struct drm_connector *connector,
+		int power_mode, void *disp)
+{
+	struct dsi_display *display = disp;
+	int rc = 0;
+	struct msm_drm_notifier notifier_data;
+	int blank;
+	bool notify_off = false;
+	if (!display || !display->panel) {
+		pr_err("invalid display/panel\n");
+		return -EINVAL;
+	}
+
+	switch (power_mode) {
+	case SDE_MODE_DPMS_LP1:
+	case SDE_MODE_DPMS_LP2:
+		if (power_mode == SDE_MODE_DPMS_LP1 &&
+		    display->panel->power_mode == SDE_MODE_DPMS_ON)
+			notify_off = true;
+
+		memset(&notifier_data, 0, sizeof(notifier_data));
+
+		if (notify_off) {
+			blank = MSM_DRM_BLANK_POWERDOWN;
+			notifier_data.data = &blank;
+			notifier_data.id = 0;
+
+			msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
+					&notifier_data);
+		}
+
+		switch(get_oppo_display_scene()) {
+		case OPPO_DISPLAY_NORMAL_SCENE:
+		case OPPO_DISPLAY_NORMAL_HBM_SCENE:
+			rc = dsi_panel_set_lp1(display->panel);
+			rc = dsi_panel_set_lp2(display->panel);
+			set_oppo_display_scene(OPPO_DISPLAY_AOD_SCENE);
+			break;
+		case OPPO_DISPLAY_AOD_HBM_SCENE:
+
+
+			/* Skip aod off if fingerprintpress exist */
+			if (!sde_connector_get_fppress_mode(connector)) {
+				mutex_lock(&display->panel->panel_lock);
+				rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_AOD_HBM_OFF);
+				mutex_unlock(&display->panel->panel_lock);
+				set_oppo_display_scene(OPPO_DISPLAY_AOD_SCENE);
+			}
+
+
+			break;
+		case OPPO_DISPLAY_AOD_SCENE:
+		default:
+			break;
+		}
+		if (notify_off)
+			msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
+					&notifier_data);
+
+		set_oppo_display_power_status(OPPO_DISPLAY_POWER_DOZE_SUSPEND);
+		break;
 	case SDE_MODE_DPMS_ON:
-		if (display->panel->power_mode == SDE_MODE_DPMS_LP1 ||
-			display->panel->power_mode == SDE_MODE_DPMS_LP2)
-			rc = dsi_panel_set_nolp(display->panel);
+		blank = MSM_DRM_BLANK_UNBLANK;
+		notifier_data.data = &blank;
+		notifier_data.id = 0;
+		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
+					   &notifier_data);
+		if ((display->panel->power_mode == SDE_MODE_DPMS_LP1) ||
+			(display->panel->power_mode == SDE_MODE_DPMS_LP2)) {
+			if (sde_connector_get_fp_mode(connector)) {
+				mutex_lock(&display->panel->panel_lock);
+				rc = dsi_panel_tx_cmd_set(display->panel, DSI_CMD_AOD_HBM_ON);
+				mutex_unlock(&display->panel->panel_lock);
+				set_oppo_display_scene(OPPO_DISPLAY_AOD_HBM_SCENE);
+			} else {
+				rc = dsi_panel_set_nolp(display->panel);
+				set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
+			}
+		}
+		oppo_dsi_update_seed_mode();
+		dsi_update_dynamic_osc_clock();
+		set_oppo_display_power_status(OPPO_DISPLAY_POWER_ON);
+		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
+					    &notifier_data);
 		break;
 	case SDE_MODE_DPMS_OFF:
+		break;
 	default:
 		return rc;
 	}
@@ -1089,6 +1306,7 @@ int dsi_display_set_power(struct drm_connector *connector,
 
 	return rc;
 }
+#endif /*OPLUS_BUG_STABILITY*/
 
 #ifdef CONFIG_DEBUG_FS
 static bool dsi_display_is_te_based_esd(struct dsi_display *display)
@@ -1327,8 +1545,11 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 		rc = -EINVAL;
 		goto error;
 	}
-
+#ifndef OPLUS_BUG_STABILITY
 	buf[user_len] = '\0'; /* terminate the string */
+#else
+	buf[user_len-1] = '\0'; /* terminate the string */
+#endif
 
 	if (kstrtouint(buf, 10, &esd_trigger)) {
 		rc = -EINVAL;
@@ -4123,14 +4344,21 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 	/* wait for dynamic refresh done */
 	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
-		rc = dsi_ctrl_wait4dynamic_refresh_done(ctrl->ctrl);
-		if (rc) {
-			pr_err("wait4dynamic refresh failed for dsi:%d\n", i);
-			goto recover_pix_clk;
-		} else {
-			pr_info("dynamic refresh done on dsi: %s\n",
-				i ? "slave" : "master");
+		#ifdef OPLUS_BUG_STABILITY
+		if (!vid_cmd_mode_change) {
+		#endif /* OPLUS_BUG_STABILITY */
+		    rc = dsi_ctrl_wait4dynamic_refresh_done(ctrl->ctrl);
+		    if (rc) {
+			    pr_err("wait4dynamic refresh failed for dsi:%d\n", i);
+			    goto recover_pix_clk;
+		    } else {
+			    pr_info("dynamic refresh done on dsi: %s\n",
+				    i ? "slave" : "master");
+		    }
+		#ifdef OPLUS_BUG_STABILITY
 		}
+		vid_cmd_mode_change = 0;
+		#endif /* OPLUS_BUG_STABILITY */
 	}
 
 	display_for_each_ctrl(i, display) {
@@ -4264,10 +4492,17 @@ static int dsi_display_dynamic_clk_configure_cmd(struct dsi_display *display,
 {
 	int rc = 0;
 
+#ifndef OPLUS_BUG_STABILITY
 	if (clk_rate <= 0) {
 		pr_err("%s: bitrate should be greater than 0\n", __func__);
 		return -EINVAL;
 	}
+#else
+	if (clk_rate <= 1040000000) {
+		pr_err("%s: bitrate should be greater than 1040000000\n", __func__);
+		return -EINVAL;
+	}
+#endif /* OPLUS_BUG_STABILITY */
 
 	if (clk_rate == display->cached_clk_rate) {
 		pr_info("%s: ignore duplicated DSI clk setting\n", __func__);
@@ -4968,7 +5203,11 @@ static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 	mutex_unlock(&dsi_display_clk_mutex);
 	mutex_unlock(&display->display_lock);
 
+#ifndef OPLUS_BUG_STABILITY
 	return rc;
+#else
+	return count;
+#endif /* OPLUS_BUG_STABILITY */
 
 }
 
@@ -5086,6 +5325,17 @@ static int dsi_display_bind(struct device *dev,
 
 	if (!display->disp_node)
 		return 0;
+
+#ifdef OPLUS_BUG_STABILITY
+	if(0 != set_oppo_display_vendor(display->name)) {
+		pr_err("maybe send a null point to oppo display manager\n");
+	}
+	/* Add for SUA feature request */
+	if(is_silence_reboot()) {
+		lcd_closebl_flag = 1;
+		lcd_closebl_flag_fp = 1;
+	}
+#endif /*OPLUS_BUG_STABILITY*/
 
 	/* defer bind if ext bridge driver is not loaded */
 	for (i = 0; i < display->panel->host_config.ext_bridge_num; i++) {
@@ -5365,7 +5615,10 @@ static struct platform_driver dsi_display_driver = {
 static int dsi_display_init(struct dsi_display *display)
 {
 	int rc = 0;
-	 struct platform_device *pdev = display->pdev;
+	struct platform_device *pdev = display->pdev;
+#ifdef CONFIG_OPLUS_FEATURE_MM_FEEDBACK
+	unsigned char payload[100] = "";
+#endif /*CONFIG_OPLUS_FEATURE_MM_FEEDBACK*/
 
 	mutex_init(&display->display_lock);
 
@@ -5376,8 +5629,17 @@ static int dsi_display_init(struct dsi_display *display)
 	}
 
 	rc = component_add(&pdev->dev, &dsi_display_comp_ops);
+
+#ifndef CONFIG_OPLUS_FEATURE_MM_FEEDBACK
 	if (rc)
 		pr_err("component add failed, rc=%d\n", rc);
+#else
+	if (rc) {
+		pr_err("component add failed, rc=%d\n", rc);
+		scnprintf(payload, sizeof(payload), "component add error panel match fault rc=%d",rc);
+		mm_fb_display_kevent(payload, MM_FB_KEY_RATELIMIT_1H, "component add failed");
+	}
+#endif /*CONFIG_OPLUS_FEATURE_MM_FEEDBACK*/
 
 	pr_debug("component add success: %s\n", display->name);
 end:
@@ -5481,6 +5743,13 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 	dsi_display_parse_cmdline_topology(display, index);
 
 	platform_set_drvdata(pdev, display);
+
+#ifdef OPLUS_BUG_STABILITY
+	if (!strcmp(dsi_type, "primary"))
+		primary_display = display;
+	else
+		secondary_display = display;
+#endif /* OPLUS_BUG_STABILITY */
 
 	rc = dsi_display_init(display);
 	if (rc)
@@ -7506,6 +7775,9 @@ int dsi_display_enable(struct dsi_display *display)
 
 		display->panel->panel_initialized = true;
 		pr_debug("cont splash enabled, display enable not required\n");
+#ifdef OPLUS_BUG_STABILITY
+		set_oppo_display_power_status(OPPO_DISPLAY_POWER_ON);
+#endif
 		return 0;
 	}
 
@@ -7593,6 +7865,11 @@ int dsi_display_post_enable(struct dsi_display *display)
 	mutex_lock(&display->display_lock);
 
 	if (display->panel->cur_mode->dsi_mode_flags & DSI_MODE_FLAG_POMS) {
+
+		#ifdef OPLUS_BUG_STABILITY
+		vid_cmd_mode_change = 1;
+		#endif /* VENDOR_EDIT */
+
 		if (display->config.panel_mode == DSI_OP_CMD_MODE)
 			dsi_panel_mode_switch_to_cmd(display->panel);
 
@@ -7625,6 +7902,10 @@ int dsi_display_pre_disable(struct dsi_display *display)
 
 	mutex_lock(&display->display_lock);
 
+#ifdef OPLUS_BUG_STABILITY
+	display->panel->need_power_on_backlight = false;
+	oppo_stop_ffl_thread();
+#endif /* OPLUS_BUG_STABILITY */
 	/* enable the clk vote for CMD mode panels */
 	if (display->config.panel_mode == DSI_OP_CMD_MODE)
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
@@ -7650,6 +7931,10 @@ int dsi_display_pre_disable(struct dsi_display *display)
 int dsi_display_disable(struct dsi_display *display)
 {
 	int rc = 0;
+#ifdef OPLUS_BUG_STABILITY
+	int blank;
+	struct msm_drm_notifier notifier_data;
+#endif
 
 	if (!display) {
 		pr_err("Invalid params\n");
@@ -7680,10 +7965,24 @@ int dsi_display_disable(struct dsi_display *display)
 	}
 
 	if (!display->poms_pending) {
+		#ifdef OPLUS_BUG_STABILITY
+		blank = MSM_DRM_BLANK_POWERDOWN;
+		notifier_data.data = &blank;
+		notifier_data.id = 0;
+		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
+				&notifier_data);
+		#endif
+
 		rc = dsi_panel_disable(display->panel);
 		if (rc)
 			pr_err("[%s] failed to disable DSI panel, rc=%d\n",
 			       display->name, rc);
+
+		#ifdef OPLUS_BUG_STABILITY
+		set_oppo_display_scene(OPPO_DISPLAY_NORMAL_SCENE);
+		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
+				&notifier_data);
+		#endif
 	}
 
 	mutex_unlock(&display->display_lock);
@@ -7781,6 +8080,13 @@ int dsi_display_unprepare(struct dsi_display *display)
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 	return rc;
 }
+
+#ifdef OPLUS_BUG_STABILITY
+struct dsi_display *get_main_display(void) {
+		return primary_display;
+}
+EXPORT_SYMBOL(get_main_display);
+#endif
 
 static int __init dsi_display_register(void)
 {

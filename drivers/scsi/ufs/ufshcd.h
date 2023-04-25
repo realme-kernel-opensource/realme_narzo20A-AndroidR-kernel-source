@@ -74,6 +74,12 @@
 #include "ufs.h"
 #include "ufshci.h"
 
+#ifdef VENDOR_EDIT
+#if defined(CONFIG_UFSFEATURE)
+#include "ufsfeature.h"
+#endif
+#endif
+
 #define UFSHCD "ufshcd"
 #define UFSHCD_DRIVER_VERSION "0.3"
 
@@ -231,6 +237,12 @@ struct ufshcd_lrb {
 #endif /* CONFIG_SCSI_UFS_CRYPTO */
 
 	bool req_abort_skip;
+
+#ifdef VENDOR_EDIT
+#if defined(CONFIG_UFSFEATURE) && defined(CONFIG_UFSHPB)
+	int hpb_ctx_id;
+#endif
+#endif
 };
 
 /**
@@ -723,6 +735,20 @@ enum ufshcd_card_state {
 	UFS_CARD_STATE_OFFLINE	= 2,
 };
 
+#ifdef VENDOR_EDIT
+#if defined(CONFIG_UFSTW_DEBUGDRV)
+struct ufstwd_dev_info {
+	struct ufs_hba *hba;
+	int lun;
+
+	struct kobject kobj;
+	struct mutex sysfs_lock;
+	struct ufstwd_sysfs_entry *sysfs_entries;
+};
+
+void ufstwd_dev_init(struct ufs_hba *hba);
+#endif
+#endif
 /**
  * struct ufs_hba - per adapter private structure
  * @mmio_base: UFSHCI base register address
@@ -1080,6 +1106,14 @@ struct ufs_hba {
 	/* distinguish between resume and restore */
 	bool restore;
 
+#ifdef VENDOR_EDIT
+#if defined(CONFIG_UFSFEATURE)
+	struct ufsf_feature ufsf;
+#endif
+#if defined(CONFIG_UFSTW_DEBUGDRV)
+	struct ufstwd_dev_info *ufstwd;
+#endif
+#endif
 #ifdef CONFIG_SCSI_UFS_CRYPTO
 	/* crypto */
 	union ufs_crypto_capabilities crypto_capabilities;
@@ -1353,6 +1387,17 @@ u32 ufshcd_get_local_unipro_ver(struct ufs_hba *hba);
 
 void ufshcd_scsi_block_requests(struct ufs_hba *hba);
 void ufshcd_scsi_unblock_requests(struct ufs_hba *hba);
+#ifdef VENDOR_EDIT
+#if defined(CONFIG_UFSFEATURE)
+int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
+			enum dev_cmd_type cmd_type, int timeout);
+int ufshcd_hibern8_hold(struct ufs_hba *hba, bool async);
+void ufshcd_hold_all(struct ufs_hba *hba);
+void ufshcd_release_all(struct ufs_hba *hba);
+int ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp);
+int ufshcd_map_sg(struct ufs_hba *hba, struct ufshcd_lrb *lrbp);
+#endif
+#endif
 
 /* Wrapper functions for safely calling variant operations */
 static inline const char *ufshcd_get_var_name(struct ufs_hba *hba)

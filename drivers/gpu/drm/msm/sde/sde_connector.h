@@ -812,8 +812,7 @@ static inline bool sde_connector_needs_offset(struct drm_connector *connector)
  * Returns: Zero on success
  */
 int sde_connector_get_dither_cfg(struct drm_connector *conn,
-		struct drm_connector_state *state, void **cfg,
-		size_t *len, bool idle_pc);
+		struct drm_connector_state *state, void **cfg, size_t *len);
 
 /**
  * sde_connector_set_blob_data - set connector blob property data

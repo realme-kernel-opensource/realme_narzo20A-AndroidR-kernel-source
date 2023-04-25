@@ -60,6 +60,8 @@ source "drivers/nfc/s3fwrn5/Kconfig"
 source "drivers/nfc/st95hf/Kconfig"
 endmenu
 
+source "drivers/nfc/oppo_nfc/Kconfig"
+
 config NFC_NQ
         tristate "QTI NCI based NFC Controller Driver for NQx"
         depends on I2C
@@ -75,3 +77,15 @@ config NTAG_NQ
           This enables NTAG driver for NTx based devices.
           NTAG is NFC tags that combine passive NFC interface with contact i2c interface.
           This is for i2c connected version.
+
+config NFC_CXD224X
+        tristate "CXD224X NFC driver"
+        depends on I2C
+        select CRC_CCITT
+        default y
+        ---help---
+          Say yes if you want Sony cxd224x Near Field Communication driver.
+          This is for i2c connected version. If unsure, say N here.
+
+          To compile this driver as a module, choose m here. The module will
+          be called cxd224x-i2c.

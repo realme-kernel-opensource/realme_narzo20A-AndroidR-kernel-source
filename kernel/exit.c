@@ -67,6 +67,13 @@
 #include <asm/unistd.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
+#ifdef OPLUS_BUG_STABILITY
+#include <soc/oplus/system/oppo_process.h>
+#endif
+
+#if defined(OPLUS_FEATURE_VIRTUAL_RESERVE_MEMORY) && defined(CONFIG_VIRTUAL_RESERVE_MEMORY)
+#include <linux/resmap_account.h>
+#endif
 
 static void __unhash_process(struct task_struct *p, bool group_dead)
 {
@@ -185,6 +192,14 @@ void release_task(struct task_struct *p)
 {
 	struct task_struct *leader;
 	int zap_leader;
+#ifdef CONFIG_OPLUS_FEATURE_FUSE_FS_SHORTCIRCUIT
+	if (p->fpack) {
+		if (p->fpack->iname)
+			__putname(p->fpack->iname);
+		kfree(p->fpack);
+		p->fpack = NULL;
+	}
+#endif /* CONFIG_OPLUS_FEATURE_FUSE_FS_SHORTCIRCUIT */
 repeat:
 	/* don't need to get the RCU readlock here - the process is dead and
 	 * can't be modifying its own credentials. But shut RCU-lockdep up */
@@ -226,7 +241,9 @@ repeat:
 	if (unlikely(zap_leader))
 		goto repeat;
 }
-
+#ifdef OPLUS_ARCH_EXTENDS
+EXPORT_SYMBOL(release_task);
+#endif
 /*
  * Note that if this function returns a valid task_struct pointer (!NULL)
  * task->usage must remain >0 for the duration of the RCU critical section.
@@ -395,6 +412,12 @@ kill_orphaned_pgrp(struct task_struct *tsk, struct task_struct *parent)
 	    task_session(parent) == task_session(tsk) &&
 	    will_become_orphaned_pgrp(pgrp, ignored_task) &&
 	    has_stopped_jobs(pgrp)) {
+#ifdef OPLUS_BUG_STABILITY
+            if (oppo_is_android_core_group(pgrp)) {
+                printk("kill_orphaned_pgrp: find android core process will be hungup, ignored it, only hungup itself:%s:%d , current=%d \n",tsk->comm,tsk->pid,current->pid);
+                return;
+            }
+#endif /*OPLUS_BUG_STABILITY*/
 		__kill_pgrp_info(SIGHUP, SEND_SIG_PRIV, pgrp);
 		__kill_pgrp_info(SIGCONT, SEND_SIG_PRIV, pgrp);
 	}
@@ -544,6 +567,9 @@ static void exit_mm(void)
 	task_unlock(current);
 	mm_update_next_owner(mm);
 
+#if defined(OPLUS_FEATURE_VIRTUAL_RESERVE_MEMORY) && defined(CONFIG_OPPO_HEALTHINFO) && defined(CONFIG_VIRTUAL_RESERVE_MEMORY)
+	trigger_svm_oom_event(mm, 0, 0);
+#endif
 	mm_released = mmput(mm);
 	if (test_thread_flag(TIF_MEMDIE))
 		exit_oom_victim();
@@ -780,6 +806,11 @@ void __noreturn do_exit(long code)
 	struct task_struct *tsk = current;
 	int group_dead;
 
+//#ifdef OPLUS_BUG_STABILITY
+    if (is_critial_process(tsk)) {
+        printk("critical svc %d:%s exit with %ld !\n", tsk->pid, tsk->comm,code);
+    }
+//#endif /*OPLUS_BUG_STABILITY*/
 	profile_task_exit(tsk);
 	kcov_task_exit(tsk);
 

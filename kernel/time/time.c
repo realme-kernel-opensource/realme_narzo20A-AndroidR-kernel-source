@@ -871,6 +871,9 @@ struct timespec timespec_add_safe(const struct timespec lhs,
 
 	return res;
 }
+#ifdef OPLUS_ARCH_EXTENDS
+EXPORT_SYMBOL(timespec_add_safe);
+#endif
 
 /*
  * Add two timespec64 values and do a safety check for overflow.
